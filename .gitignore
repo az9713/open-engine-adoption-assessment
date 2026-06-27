@@ -1,0 +1,11 @@
+# Local-only working material: raw third-party sources, session logs, scratch notes.
+# Not redistributed — see README "Source references" for the originals.
+.ignore/
+
+# Project-internal instructions / agent memory (not part of the published deliverable)
+CLAUDE.md
+memory/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
