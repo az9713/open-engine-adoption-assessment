@@ -29,6 +29,15 @@ its most valuable idea into a reusable prompt template that needs zero infrastru
    redoing the work — so `DONE WHEN` should lean on *traceability*, *method*, and *declared
    gaps* instead.
 
+## Worked trace — one job through every primitive
+
+This is the capstone of the dissection (REPORT.md §8): a single job — *change the Pro-tier
+price from $29 to $39 and ship it* — flowing across two agents, a data-block, and a deploy
+gate. The gold cards are the **only three moments a human is touched** (file the job, approve
+the copy, approve the deploy); everything else is automated.
+
+![Open Engine worked trace: one job through every primitive, with only three human touches](open-engine-10-steps.png)
+
 ## What's here
 
 | File | What it is |
@@ -36,6 +45,7 @@ its most valuable idea into a reusable prompt template that needs zero infrastru
 | [`open-engine-adoption-assessment.md`](open-engine-adoption-assessment.md) | The decision record: why skip full adoption now, when to revisit, and the distilled prompt |
 | [`work-mode-template.md`](work-mode-template.md) | The 3-habit work-mode prompt template, with worked examples and an anti-pattern |
 | [`REPORT.md`](REPORT.md) | Full architecture dissection of Open Engine + transferable design principles |
+| [`open-engine-10-steps.png`](open-engine-10-steps.png) | The worked-trace diagram above (REPORT.md §8), as a standalone image |
 
 > Raw source material (video transcript, article text, the Open Engine guide) is **not**
 > redistributed here — see the linked originals below.

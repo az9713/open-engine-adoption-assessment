@@ -305,6 +305,51 @@ What's left for you after all five are externalized is only the **two things tha
 > The deepest lesson is that **"without you stuck in the middle" and "explicit contracts everywhere" are the same statement read from two ends.** You are the cost of *implicit* coupling; a contract is what makes the coupling explicit; so each contract is literally one unit of you-removed-from-the-loop. This is why the author can say "Call it bureaucracy if you want. It's respect for the task" without irony — the verbosity of the task record is not overhead, it is the *price of your own freedom from the hallway*. Every field you fill in is a dependency you no longer have to satisfy in person.
 > `─────────────────────────────────────────────`
 
+## 8. A worked trace: one job through every primitive (and the only three times a human is touched)
+
+Abstract contracts convince no one. Here is a single, ordinary job run end-to-end. Watch the right-hand margin: **"Human?"** marks every moment a person is actually required. There are exactly three, and all three are *decisions or authority* — never transport, translation, routing, memory, or recovery.
+
+**The cast (a two-runtime mini-team)**
+- **Dana** — the requester; owns the decision, runs no agent of her own.
+- **Sam** + **`sam-claude`** (a Claude Code runtime) — copy/research.
+- **Alex** + **`alex-codex`** (a Codex runtime) — code + deploy.
+
+**Standing setup, already in place (the private/standing layer — §3–§5):** a Linear team with the six statuses [Primitive B] and the `agent-instructions` label; three `Standing` issues — a **routing map**, the **status ledger**, and **`standing_skill` packet v3** [contract 8]; each runtime carries its own private **`SKILL.md`** with rules + an **ask-first list** that includes *deploy* [Primitive E / contract 7]. The loop was **smoke-tested** before anyone trusted it [§6]. None of this is rebuilt per job.
+
+**The job:** change the Pro-tier price copy from $29 to $39 on the marketing page, and ship it. This naturally crosses *both* agents — copy, then code, then a deploy.
+
+| Step | What happens | Primitives / contracts firing | Human? |
+|---|---|---|---|
+| 1 | **Dana files the task.** Title `[agent instructions][sam-claude][task] Rewrite Pro-tier copy for the new $39 price`; `agent-instructions` label; **assignee = Sam** (the owner of the target agent, *not* Dana herself); body fills all 8 fields (sources = call transcript + `pricing.md`; boundaries = *don't touch other tiers, don't deploy*; output_handoff = paste copy in-issue + open a code follow-up). Status → `Agent Todo`. | Task record [A/contract 1] · naming + addressing [D/contract 4] · route-to-owner [contract 8] | **Yes — but only to *describe* the job.** She never executes it. *(requester ≠ worker)* |
+| 2 | **`sam-claude` runs its loop.** Marks `AGENT STATUS`="checking" [heartbeat]; standing **preflight** finds packet v3 = local v3, OK [contract 8]; no holds/blocks/delegations to resume; **claims** the oldest eligible `Agent Todo` for its code → moves to `Agent Working` (the visible lock), posts `AGENT CLAIMED`, **re-reads** the issue (race check) [§3 optimistic lock]. | Runner [E] · receipts [C/contract 3] · state machine [B/contract 2] · one-task transaction [§3/contract 6] | — |
+| 3 | **It does the scoped work:** rewrites the three bullets, **pastes the copy into the issue** (output_handoff). Then, per the task, **opens a follow-up** issue for the code edit, titled `[agent instructions][alex-codex][task] …`, **assigned to Alex**; before relying on it, it checks the **ledger liveness** — is `alex-codex` online? It is. | output_handoff [A] · delegation + service discovery [contract 8] · liveness gate [§5] | — *(transport done by the queue, not Dana)* |
+| 4 | Copy is customer-facing → "agent finished, but a human should eyeball voice." It moves the issue to **`Agent Review`** (not `Agent Done`) and posts `AGENT DONE`, updates the ledger, and **STOPS after one task**. | agent-done ≠ work-done [B] · one-task stop [§3] | — |
+| 5 | **Dana reviews.** She sees it in `Agent Review`, tweaks one word, approves. | `Agent Review` checkpoint [B] | **Yes — judgment.** First human touch since step 1; a *decision*, not carrying state. |
+| 6 | **`alex-codex` runs its own loop** (separate operator, separate secrets — they share only the protocol). It claims the follow-up (`Agent Working`, `AGENT CLAIMED`, re-read) and edits `pricing.md` to $39 — *Pro tier only*, per its boundary. | identity/vendor decoupling [contract 4] · policy/secrets split [contract 7] · scoped boundaries | — |
+| 7 | Mid-work it notices the **transcript link 404s** — it can't confirm the number is really $39. That's **missing *data***, answerable by anyone: it posts `AGENT BLOCKED` *on the issue*, moves to `Agent Needs Input`, STOPS. Dana drops a comment: "confirmed, $39." | BLOCKED = recoverable data pause [C/contract 5] | **(no new touch)** — answered in the open by whoever reads the queue. |
+| 8 | Next run: **resume-blocked before claiming new work** [§3 ordering]; posts `AGENT UNBLOCKED` + `AGENT RESUMED`, finishes the edit. But the job needs a **deploy**, and *deploy is on the ask-first list* — that's **missing *authority***, not data. It posts `AGENT HUMAN HOLD`, asks **in Alex's own private agent thread** (off-issue), and STOPS. | resume-first [§3] · BLOCKED→UNBLOCKED [C] · **authority vs data** [contract 5] · ask-first policy [E/contract 7] | **Yes — authority.** Second/last human-as-gatekeeper; a *permission*, not transport. |
+| 9 | Alex approves the deploy in his thread. Next run **resumes the hold first**, posts `AGENT HUMAN ANSWERED` + `AGENT RESUMED`, runs the deploy, posts `AGENT DONE`, moves to **`Agent Done`** (completed). *(Had the deploy errored, it would post `AGENT FAILED` with the last safe step + retry count — a diagnosable dead-letter, not a mystery.)* | resume-first [§3] · failure-as-dead-letter [C] · completed state [B] | — *(recovery is the loop's job, not Alex's)* |
+| 10 | On its next run, **`sam-claude` checks the issues it delegated**, sees the follow-up reached `Agent Done`, and posts `AGENT FOLLOW-UP` on Dana's original issue. The loop closes. Dana reads the entire receipt trail without having asked anyone for a status. | delegated callback [C/contract 3] · closing the loop | — *(memory lives in the log, not Dana's head)* |
+
+### Coverage check — did it really touch everything?
+
+| Primitive / layer | Where it fired |
+|---|---|
+| **A — task record (8 fields)** | step 1 (created), step 3 (output_handoff used) |
+| **B — status taxonomy (6 statuses)** | Todo→Working (2), Review (4–5), Needs Input (7–8), Done (9); `Standing` = the setup issues |
+| **C — receipt vocabulary** | `STATUS`, `CLAIMED`, `DONE` (2–4); `BLOCKED`/`UNBLOCKED` (7–8); `HUMAN HOLD`/`HUMAN ANSWERED` (8–9); `RESUMED` (8–9); `FAILED` (9, contingency); `APPLIED` (preflight contingency, step 2); `FOLLOW-UP` (10) |
+| **D — naming contract** | steps 1 & 3 (title brackets + label + assignee + agent codes) |
+| **E — private packet / runner** | the repeated loop (2,6,8) + the ask-first rule that fired in step 8 |
+| **§3 execution model** | one-task stop (4), optimistic lock + re-read (2,6), resume-before-claim (8,9) |
+| **§4 public/private split** | step 6 — two operators cooperate sharing only the protocol, never secrets |
+| **§5 team layer** | route-to-owner (1,3), liveness gate (3), standing preflight (2) |
+| **§6 verification** | the pre-trusted smoke test in setup |
+| **§7 — the 8 contracts** | every row's right-hand column |
+
+### The punchline
+
+Trace the **Human?** column: **three touches — file the job (step 1), approve the copy (step 5), approve the deploy (step 8)** — and the data-block in step 7 resolved without adding a fourth. Every one is a *decision* (judgment) or a *permission* (authority): the two things §7 identified as irreducibly human. At **no** point did Dana, Sam, or Alex **carry state between Claude and Codex**, **translate** one tool's output into another's input, **decide who works next**, **remember what was agreed**, or **clean up a failure** — the queue, the receipts, the routing map, the ledger, and the one-task transaction did each of those. The work commuted across two vendors, two operators, a block, and a deploy gate, and came back to Dana with a full receipt. *That* is "without you stuck in the middle": the human is an **endpoint the system escalates to**, not the **bus every handoff rides.**
+
 ---
 
 # PART 3 — How to think about building systems like this
