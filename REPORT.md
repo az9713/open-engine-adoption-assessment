@@ -307,6 +307,8 @@ What's left for you after all five are externalized is only the **two things tha
 
 ## 8. A worked trace: one job through every primitive (and the only three times a human is touched)
 
+![Open Engine worked trace: one job through every primitive, with only three human touches (gold cards)](open-engine-10-steps.png)
+
 Abstract contracts convince no one. Here is a single, ordinary job run end-to-end. Watch the right-hand margin: **"Human?"** marks every moment a person is actually required. There are exactly three, and all three are *decisions or authority* — never transport, translation, routing, memory, or recovery.
 
 **The cast (a two-runtime mini-team)**
