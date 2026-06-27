@@ -200,6 +200,111 @@ A team engine is "the same system with one extra rule: **route work to the human
 ## 6. Verification is a first-class component
 The smoke test is not an afterthought; it's step 6 and the guide refuses to let you trust the engine until **four behaviors** demonstrably work: **claim → done**, **blocked → resume**, and **human-hold → answer**, each as its own tiny throwaway task. "You are testing the loop, not the agent's intelligence." This is **integration-testing the protocol, not the worker** — you assert the state machine and the receipts, not whether the LLM is smart.
 
+## 7. The unifying lens: every contract is a decoupling, and every decoupling removes you from the middle
+
+Everything above can be read through one idea, and it's the idea that turns a pile of conventions into a *system*.
+
+**A contract** is an agreed-upon interface two parties interact *through*, so neither has to know the other's internals. **Decoupling** is what a contract buys: it removes a direct, synchronous, knowledge-bearing dependency between two parties — they no longer have to be the *same* party, *present at the same time*, or *aware of each other's details* to cooperate.
+
+Here is the move that makes Open Engine click: **before the contracts exist, the thing coupling every pair of tools together is _you_.** You are the universal adapter — the default coupling wherever no explicit interface exists. You carry the state Claude produced over to Codex; you translate the decision from the call into the email; you remember which source mattered; you decide who works next. Each contract in the system externalizes *one dimension* of that coupling into a shared artifact — and the instant it does, you stop being the conduit for that dimension.
+
+### The contracts, and exactly what each one decouples
+
+| # | The contract | Sits between… | What it decouples (so one side no longer needs the other through *you*) | How it pulls you out of the middle |
+|---|---|---|---|---|
+| 1 | **Task record / schema** (Primitive A — the 8-field `<task_issue>`) | the **requester** and the **worker** | *who asks* from *who executes*. The job is fully described in the artifact — sources, acceptance, boundaries — so **any** worker can pick it up cold. | You no longer have to be the one who *runs* what you requested. Asking ≠ doing. |
+| 2 | **Status taxonomy / state machine** (Primitive B — 6 statuses) | the **state of work** and **anyone observing it** | *doing the work* from *knowing where it stands*. The status **is** the truth; reading it requires no conversation. It also splits **"agent done"** from **"work done"** (`Agent Done` vs `Agent Review`). | You don't have to be asked "where is this?" — the lane answers. You're pulled in only at `Agent Review`, the one honest place a human is required. |
+| 3 | **Receipt vocabulary** (Primitive C — 11 tokens, the event log) | the **agent that did something** and **whoever reads it later** | *the act* from *the audience*. What happened is written once, append-only; the next reader reconstructs state from the log, not from your memory. | You stop being the **carrier of "what was decided."** The history holds it, so the next hop reads the artifact instead of asking you. |
+| 4 | **Naming contract** (Primitive D — title brackets + label + assignee) | a **Claude runtime** and a **Codex runtime** (or any two) | *routing* from *vendor integration*. Heterogeneous agents coordinate purely by agreeing how to parse a title — no API between vendors. | You're no longer the **translator/router between tools.** The string convention *is* the interoperability layer; you don't hand-carry work across the vendor gap. |
+| 5 | **Blocked vs. Human-Hold split** (Primitive C, the key receipt pair) | a **missing fact** and a **missing authority** | *missing data* from *missing permission*. Data-blocks resolve in the open (anyone reading the queue can answer); auth-holds escalate to a specific privileged human. | Only the questions that are *genuinely yours* (permission, install, account authority) reach you. Data questions stop landing on your desk. |
+| 6 | **Execution contract** (§3 — one task per run + optimistic lock + resume-first) | **one unit of work** and **the rest of the queue** | *each task's success/failure* from *every other task's*. One run = one atomic, restartable transaction; a crash leaves one diagnosable `AGENT CLAIMED`. | You're not the **recovery mechanism.** Failures are small and self-describing, so you don't have to forensically reconstruct a half-drained queue. |
+| 7 | **Policy/mechanism + secrets split** (§4 — public method vs. private packet) | **one operator** and **another** (or a runtime and its rules) | *the shared protocol* from *each party's private rules and secrets*. Two strangers run the same queue while sharing only the mechanism, never their policy or credentials. | You're not the **integration negotiator.** Interop needs no exchange of secrets or rulebooks, so onboarding another agent/teammate doesn't route through you. |
+| 8 | **Versioned standing context + routing map** (§5 — config rollout + service discovery) | a **config change** and its **consumers**; a **sender** and a **target's location** | *publishing config* from *consuming it* (pull-based preflight), and *sending work* from *knowing where the target lives* (the map). | You don't **hand-deliver updates** or memorize who-runs-what. Agents self-update on preflight and look up the route themselves. |
+
+### The concrete artifacts behind each contract
+
+The contracts above are abstractions; here is what each one actually *is* on disk and in Linear. The striking pattern: **almost nothing is a local file.** The artifacts live in the borrowed substrate (Linear issues, statuses, comments, titles) — the operator's machine stays nearly empty. Only the private packet (contract 7) is a real file, and it exists precisely because it holds the secrets that *must not* go into the shared substrate.
+
+1. **Task record / schema**
+   - *Artifact:* one **Linear issue**, its body filled from the §11 `<task_issue>` template (8 fields).
+   - *Inputs:* the requester's typed fields (requester · desired_outcome · context · sources · do · acceptance_criteria · output_handoff · boundaries).
+   - *Outputs:* a created issue sitting in `Agent Todo`, plus the `output_handoff` pointer to wherever the resulting artifact will land.
+   - *Local files:* **none** — it is a Linear issue.
+
+2. **Status taxonomy / state machine**
+   - *Artifact:* the **six custom workflow statuses** configured once in Linear team settings (guide step "create the six workflow statuses"), plus each issue's current `status` field.
+   - *Inputs:* status transitions (a runtime *moving* the issue between lanes).
+   - *Outputs:* the issue's lane — the single source of truth for "where this stands."
+   - *Local files:* **none** — Linear configuration + the issue's status field.
+
+3. **Receipt vocabulary**
+   - *Artifact:* **comments on the Linear issue** — the 11 tokens posted append-only.
+   - *Inputs:* a token + a short note, posted by the runtime at each lifecycle event.
+   - *Outputs:* the issue's comment history (the event log) and the single in-place `AGENT STATUS` ledger comment.
+   - *Local files:* **none** — Linear comments.
+
+4. **Naming contract**
+   - *Artifact:* the **issue title string** `[agent instructions][<agent-code>][task] <outcome>`, the `agent-instructions` **label**, and the **assignee** field.
+   - *Inputs:* the title text + label + assignee chosen at creation.
+   - *Outputs:* an *eligible, addressable* issue (the parse target every runtime agrees on).
+   - *Local files:* **none** — it is metadata on the Linear issue.
+
+5. **Blocked vs. Human-Hold split**
+   - *Artifact:* two receipt comments (`AGENT BLOCKED` / `AGENT HUMAN HOLD`) + the `Agent Needs Input` status. The block answer lands **on the issue**; the hold answer lands **off-issue, in the owner's own agent thread/app**.
+   - *Inputs:* the unanswered question, typed where the rule dictates (issue comment vs. private thread).
+   - *Outputs:* either an `AGENT UNBLOCKED` comment (data arrived) or an `AGENT HUMAN ANSWERED` comment (authority granted).
+   - *Local files:* **none in Linear terms** — but note the hold channel is an *external* surface (the human's private agent thread), the one artifact deliberately *outside* the shared queue.
+
+6. **Execution contract (the runner)**
+   - *Artifact:* the **runner prompt** — "one instruction your agent repeats" (the guide's Queue-run / runner prompt) — plus its **trigger**: a manual run, the runtime's scheduler, or a **cron job** (e.g. an Oz container / Codex automation).
+   - *Inputs:* the current queue + ledger state at the moment of the run.
+   - *Outputs:* exactly one issue advanced (`claim → work → receipt → ledger update`), then a stop.
+   - *Local files:* the runner prompt usually lives **inside the private packet** (`SKILL.md`); the scheduler/cron definition is a small config in the runtime or cloud platform. The *contract itself* is text, not code.
+
+7. **Policy/mechanism + secrets split**
+   - *Artifact:* **the one real file** — a per-runtime **private context packet**, default `~/.codex/skills/open-agent-engine/SKILL.md` (guide line 212), optionally mirrored by a private `Standing` issue; on the public side, the **published guide** (method only, no secrets). MCP wiring also touches `~/.codex/config.toml`.
+   - *Inputs:* local paths, allowed sources, account boundaries, the `Rules:` block, secrets/credentials, and the ledger issue ID.
+   - *Outputs:* a loaded policy+secret context each runtime reads *before* it acts; nothing secret ever enters the shared queue.
+   - *Local files:* **yes — `~/.codex/skills/open-agent-engine/SKILL.md` (+ `~/.codex/config.toml`).** This is the *only* contract whose primary artifact is a file, by design.
+
+8. **Versioned standing context + routing map**
+   - *Artifact:* **private `Standing` Linear issues**, one per context family — the `standing_skill` setup issue, the `standing_status` ledger, and the **routing map** issue (human → assignee → runtime → agent-code → ownership area). Each carries a **version + changelog** in its body.
+   - *Inputs:* a version bump + changelog edit (in place — never a new ticket); the `AGENT APPLIED` receipt a runtime posts after it installs the new version locally.
+   - *Outputs:* an updated Standing issue that agents compare against their local version at preflight (pull-based, eventually consistent).
+   - *Local files:* the *target* is a Linear Standing issue; the **local mirror** is whatever the runtime installs into its own `SKILL.md` to match the bumped version.
+
+> `★ Insight ─────────────────────────────────`
+> Tally the "Local files" lines: **seven of eight contracts have none.** The entire coordination fabric — work items, lifecycle, event log, addressing, escalation, config rollout — is *rented* from Linear, so there is no database, no message broker, and almost no local state to back up, migrate, or corrupt. The lone exception is contract 7's `SKILL.md`, and it's local for the one reason that *forces* locality: it holds secrets and machine-specific paths that the shared substrate must never see. The architecture's "files" footprint is therefore a near-perfect readout of its trust boundary — public protocol in Linear, private secrets on disk, and nothing else.
+> `─────────────────────────────────────────────`
+
+### What the decouplings achieve, together
+
+Stack them and a pattern appears — they are decouplings along the exact axes a human normally has to bridge by hand:
+
+- **Decoupling in *identity*** (contracts 1, 4): the requester need not be the worker; one vendor need not integrate with another. → *You aren't the executor or the translator.*
+- **Decoupling in *time*** (contracts 2, 3, 6, 8): the queue, the statuses, the receipts, and the versioned config all let work move **asynchronously** — no party has to be present at the moment of handoff, and a pause is a checkpoint, not a stall. → *You don't have to be in the room when the baton is passed.*
+- **Decoupling of *knowledge*** (contracts 2, 3): state and history live in inspectable artifacts, not in your head. → *You aren't the memory.*
+- **Decoupling of *authority from data*** (contract 5): only true permission/authority escalations are routed to a human. → *You're interrupted for judgment, never for lookup.*
+- **Decoupling of *policy from secrets*** (contract 7): cooperation needs only the shared protocol. → *You aren't the trust broker.*
+
+The throughline: **a human is the default coupling precisely wherever an explicit contract is missing.** "The integration layer is you" (Part 1) is not a complaint about effort — it is a *diagnosis*: every place you feel stuck in the middle is a place where two parties are cooperating with no interface between them, so the only available adapter is a person. Open Engine's whole design is to find each of those gaps and drop in the *minimum viable contract* that fills it.
+
+### How this produces "without you stuck in the middle"
+
+The goal was never to remove you from the system — it's to remove you from the **critical path of every handoff.** Watch what each role you used to play becomes once its contract exists:
+
+- **Transport** (carrying state tool→tool) → the **queue + receipts** carry it.
+- **Translation** (reformatting between vendors) → the **naming contract** makes them speak directly.
+- **Routing** (deciding who's next) → the **routing map + assignee rule** decide it.
+- **Memory** (holding what was decided) → the **status ledger + event log** hold it.
+- **Recovery** (cleaning up failures) → the **one-task transaction** makes failures self-contained.
+
+What's left for you after all five are externalized is only the **two things that are irreducibly human**: **judgment** (the `Agent Review` decisions you own) and **authority** (the `Human Hold` permissions only you can grant). You drop from being the *bus that everything rides* to being an *endpoint that gets escalated to*. The work can now traverse the entire pipeline agent-to-agent and come back to you with a receipt — and that, precisely, is the promise from the one-sentence claim: agents "hand off work, carry the sources, and leave a receipt — **without you stuck in the middle.**"
+
+> `★ Insight ─────────────────────────────────`
+> The deepest lesson is that **"without you stuck in the middle" and "explicit contracts everywhere" are the same statement read from two ends.** You are the cost of *implicit* coupling; a contract is what makes the coupling explicit; so each contract is literally one unit of you-removed-from-the-loop. This is why the author can say "Call it bureaucracy if you want. It's respect for the task" without irony — the verbosity of the task record is not overhead, it is the *price of your own freedom from the hallway*. Every field you fill in is a dependency you no longer have to satisfy in person.
+> `─────────────────────────────────────────────`
+
 ---
 
 # PART 3 — How to think about building systems like this
