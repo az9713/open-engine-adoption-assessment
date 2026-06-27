@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Open Engine — Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Stands in for the design system's colors_and_type.css: a serif display face,
+     DM Sans (the deck's own override), and a mono for the code/receipt tokens. -->
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --font-sans:"DM Sans", system-ui, -apple-system, sans-serif;
+    --font-serif:"Fraunces", Georgia, "Times New Roman", serif;
+    --font-mono:"DM Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; }
+  body{ background:#0F0F0E; font-optical-sizing:auto; }
+
+  /* --- text roles, lifted verbatim from the deck's <helmet> --- */
+  section[data-label]{ font-family:var(--font-sans); }
+  .eyb{ font-size:24px; font-weight:600; letter-spacing:0.14em; text-transform:uppercase; color:#BD5D3A; }
+  .ttl{ font-family:var(--font-serif); font-weight:400; letter-spacing:-0.02em; line-height:1.04; color:#1F1E1D; }
+  .led{ font-family:var(--font-serif); line-height:1.42; color:#3D3D3A; }
+  .mono{ font-family:var(--font-mono); }
+
+  /* --- the "stage": replaces deck-stage.js. Each slide is 1920x1080,
+         scaled to fit the viewport; one shown at a time. --- */
+  .stage{ position:fixed; inset:0; overflow:hidden; }
+  /* Absolute + translate(-50%,-50%) centers reliably even when the 1080px slide
+     is taller than a short viewport — grid/flex centering lets the auto-sized
+     track keep its full height and the scale pivot then pushes the slide off-centre. */
+  .deck{ position:absolute; left:50%; top:50%; width:1920px; height:1080px;
+         transform:translate(-50%,-50%) scale(var(--s,1)); transform-origin:center center; }
+  .deck > section{ width:1920px; height:1080px; }
+
+  .hud{ position:fixed; right:18px; bottom:14px; z-index:10;
+        font-family:var(--font-mono); font-size:13px; color:#87867F;
+        background:rgba(25,25,24,0.7); padding:6px 12px; border-radius:999px;
+        user-select:none; pointer-events:none; }
+  @media print{ .hud{ display:none; } }
+</style>
+</head>
+<body>
+<div class="stage"><div class="deck">
+
+  <!-- 1 — TITLE -->
+  <section data-label="Title" data-speaker-notes="Open Engine: a shared task queue that lets AI agents hand off work without a human acting as the copy-paste glue. This deck dissects its architecture, its primitives, and walks one real job end to end." style="padding:96px 120px; display:flex; flex-direction:column; justify-content:space-between; background:#191918; color:#F5F4EE; overflow:hidden;">
+    <div style="display:flex; align-items:center; gap:18px;">
+      <span style="width:16px; height:16px; border-radius:50%; background:#D97757; display:inline-block;"></span>
+      <span class="eyb" style="color:#D9A38C;">Architecture briefing</span>
+    </div>
+    <div style="max-width:1400px;">
+      <h1 class="ttl" style="font-size:128px; color:#F5F4EE; margin:0;">Open&nbsp;Engine</h1>
+      <p class="led" style="font-size:40px; color:#CFC9BE; margin:36px 0 0; max-width:1180px;">A shared task queue that lets AI agents hand off work — carrying the sources, respecting the limits, leaving a receipt — without you stuck in the middle.</p>
+    </div>
+    <div style="display:flex; justify-content:space-between; align-items:flex-end; border-top:1px solid rgba(245,244,238,0.16); padding-top:28px;">
+      <span style="font-size:24px; color:#87867F;">A distributed-systems reading of a multi-agent coordination protocol</span>
+      <span style="font-size:24px; color:#87867F;">Source · Nate B. Jones, <span style="font-style:italic;">Open Engine</span></span>
+    </div>
+  </section>
+
+  <!-- 2 — PROBLEM -->
+  <section data-label="The problem" data-speaker-notes="The model is no longer the bottleneck — the handoff between agents is. A real job today doesn't live in one tool; it commutes across seven systems, and at every crossing a human carries the state. The integration layer is you." style="padding:84px 104px; display:flex; flex-direction:column; background:#F0EEE6; color:#1F1E1D; overflow:hidden;">
+    <div class="eyb">The problem</div>
+    <h2 class="ttl" style="font-size:62px; margin:20px 0 10px;">The integration layer is you</h2>
+    <p class="led" style="font-size:30px; max-width:1180px; margin:0 0 14px;">A real job doesn't live in one tool — it commutes. Not seven jobs; one job crossing seven systems.</p>
+
+    <div style="display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:14px; margin:30px 0 8px;">
+      <span style="font-size:26px; font-weight:600; background:#fff; border:1px solid rgba(31,30,29,0.12); border-radius:8px; padding:16px 22px;">Claude finds the argument</span>
+      <span style="font-size:30px; color:#D97757; font-weight:700;">&rarr;</span>
+      <span style="font-size:26px; font-weight:600; background:#fff; border:1px solid rgba(31,30,29,0.12); border-radius:8px; padding:16px 22px;">Codex edits the file</span>
+      <span style="font-size:30px; color:#D97757; font-weight:700;">&rarr;</span>
+      <span style="font-size:26px; font-weight:600; background:#fff; border:1px solid rgba(31,30,29,0.12); border-radius:8px; padding:16px 22px;">ChatGPT re-reads the draft</span>
+      <span style="font-size:30px; color:#D97757; font-weight:700;">&rarr;</span>
+      <span style="font-size:26px; font-weight:600; background:#fff; border:1px solid rgba(31,30,29,0.12); border-radius:8px; padding:16px 22px;">A browser agent checks the render</span>
+    </div>
+    <div style="display:flex; align-items:center; justify-content:center; gap:16px; margin:4px 0 0;">
+      <span style="font-size:24px; color:#6F6E69;">Slack holds the conversation</span>
+      <span style="color:#B4B3AC; font-size:24px;">·</span>
+      <span style="font-size:24px; color:#6F6E69;">Linear holds the task</span>
+      <span style="color:#B4B3AC; font-size:24px;">·</span>
+      <span style="font-size:24px; color:#6F6E69;">the calendar decides if any of it survives the afternoon</span>
+    </div>
+
+    <div style="margin-top:auto; display:grid; grid-template-columns:1.3fr 1fr; gap:36px; align-items:end;">
+      <p style="font-size:34px; line-height:1.4; color:#1F1E1D; margin:0; font-weight:500;">Every crossing, a human carries the state — what was decided, which source mattered, what the next tool may touch. <span style="color:#D97757; font-weight:700;">The integration layer is you.</span></p>
+      <div style="background:#fff; border:1px solid rgba(31,30,29,0.12); border-radius:10px; padding:22px 26px;">
+        <div style="font-size:22px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#6F6E69; margin-bottom:8px;">Output vs. work</div>
+        <p style="font-size:25px; line-height:1.4; margin:0; color:#3D3D3A;">A beautiful brief in a private chat is a draft in a room by itself. <span style="color:#1F1E1D; font-weight:600;">Work is something the next agent can review, accept, and build on.</span></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 — ARCHITECTURE -->
+  <section data-label="Architecture" data-speaker-notes="Open Engine is a distributed task-queue / blackboard system whose message bus is a human-readable issue tracker. The architect's first move: recognize that Linear already has issues, assignees, statuses, labels, comments, and history — exactly a work item, addressing, a state machine, a routing tag, an event log, and an audit trail. So the build is the protocol, not the plumbing. It groups into five planes." style="padding:78px 104px; display:flex; flex-direction:column; background:#F0EEE6; color:#1F1E1D; overflow:hidden;">
+    <div class="eyb">Architecture</div>
+    <h2 class="ttl" style="font-size:58px; margin:16px 0 22px;">Borrowed substrate, written protocol</h2>
+    <div style="display:grid; grid-template-columns:0.82fr 1.18fr; gap:54px; flex:1; min-height:0;">
+      <div style="display:flex; flex-direction:column; justify-content:flex-start; gap:24px;">
+        <p class="led" style="font-size:29px; margin:0;">A distributed task-queue / blackboard system whose <span style="color:#1F1E1D; font-weight:600; font-family:var(--font-sans);">message bus is a human-readable issue tracker</span>, and whose workers are heterogeneous LLM agents.</p>
+        <div style="background:#191918; color:#F5F4EE; border-radius:12px; padding:26px 28px;">
+          <div style="font-size:21px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:#D9A38C; margin-bottom:10px;">The key recognition</div>
+          <p style="font-size:25px; line-height:1.45; margin:0; color:#E7E3DA;">A project-management tool is already <span style="color:#fff; font-weight:700;">80% of a multi-agent message bus.</span> The build reduces to writing the protocol — not the plumbing.</p>
+        </div>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:12px;">
+        <div style="display:grid; grid-template-columns:34px 1.15fr 1fr; gap:18px; padding:0 18px 6px; font-size:20px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#87867F;">
+          <span>#</span><span>Plane · component</span><span>Distributed-systems analogue</span>
+        </div>
+        <div style="display:grid; grid-template-columns:34px 1.15fr 1fr; gap:18px; align-items:center; background:#fff; border:1px solid rgba(31,30,29,0.12); border-radius:10px; padding:18px 18px;">
+          <span style="width:34px; height:34px; border-radius:50%; background:#D97757; color:#fff; font-size:20px; font-weight:700; display:flex; align-items:center; justify-content:center;">1</span>
+          <span style="font-size:25px;"><span style="font-weight:700;">Substrate / bus</span><br><span style="color:#6F6E69; font-size:22px;">Linear queue · 6 statuses + label</span></span>
+          <span style="font-size:23px; color:#3D3D3A;">message bus + work queue</span>
+        </div>
+        <div style="display:grid; grid-template-columns:34px 1.15fr 1fr; gap:18px; align-items:center; background:#fff; border:1px solid rgba(31,30,29,0.12); border-radius:10px; padding:18px 18px;">
+          <span style="width:34px; height:34px; border-radius:50%; background:#D97757; color:#fff; font-size:20px; font-weight:700; display:flex; align-items:center; justify-content:center;">2</span>
+          <span style="font-size:25px;"><span style="font-weight:700;">Contracts / schema</span><br><span style="color:#6F6E69; font-size:22px;">Task record · naming convention</span></span>
+          <span style="font-size:23px; color:#3D3D3A;">message schema + addressing</span>
+        </div>
+        <div style="display:grid; grid-template-columns:34px 1.15fr 1fr; gap:18px; align-items:center; background:#fff; border:1px solid rgba(31,30,29,0.12); border-radius:10px; padding:18px 18px;">
+          <span style="width:34px; height:34px; border-radius:50%; background:#D97757; color:#fff; font-size:20px; font-weight:700; display:flex; align-items:center; justify-content:center;">3</span>
+          <span style="font-size:25px;"><span style="font-weight:700;">State &amp; observability</span><br><span style="color:#6F6E69; font-size:22px;">Status ledger · receipt vocabulary</span></span>
+          <span style="font-size:23px; color:#3D3D3A;">service registry + event log</span>
+        </div>
+        <div style="display:grid; grid-template-columns:34px 1.15fr 1fr; gap:18px; align-items:center; background:#fff; border:1px solid rgba(31,30,29,0.12); border-radius:10px; padding:18px 18px;">
+          <span style="width:34px; height:34px; border-radius:50%; background:#D97757; color:#fff; font-size:20px; font-weight:700; display:flex; align-items:center; justify-content:center;">4</span>
+          <span style="font-size:25px;"><span style="font-weight:700;">Execution</span><br><span style="color:#6F6E69; font-size:22px;">Queue runner · private context packet</span></span>
+          <span style="font-size:23px; color:#3D3D3A;">worker / poller + config &amp; secrets</span>
+        </div>
+        <div style="display:grid; grid-template-columns:34px 1.15fr 1fr; gap:18px; align-items:center; background:#fff; border:1px solid rgba(31,30,29,0.12); border-radius:10px; padding:18px 18px;">
+          <span style="width:34px; height:34px; border-radius:50%; background:#D97757; color:#fff; font-size:20px; font-weight:700; display:flex; align-items:center; justify-content:center;">5</span>
+          <span style="font-size:25px;"><span style="font-weight:700;">Coordination (team)</span><br><span style="color:#6F6E69; font-size:22px;">Routing map · standing updates</span></span>
+          <span style="font-size:23px; color:#3D3D3A;">service discovery + shared config</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 — PRIMITIVES OVERVIEW -->
+  <section data-label="Five primitives" data-speaker-notes="Bottom-up: the system is five primitives. The task record is the message; the status taxonomy is the state machine; the receipt vocabulary is the event log; the naming contract is addressing and routing; the runner loop is the worker. Each maps to a classic distributed-systems pattern re-applied to agents." style="padding:84px 104px; display:flex; flex-direction:column; background:#F0EEE6; color:#1F1E1D; overflow:hidden;">
+    <div class="eyb">The primitives</div>
+    <h2 class="ttl" style="font-size:58px; margin:16px 0 6px;">Five primitives, one queue</h2>
+    <p class="led" style="font-size:28px; max-width:1200px; margin:0 0 30px;">Each is a classic distributed-systems pattern, re-applied to non-deterministic workers — and almost none of it is new infrastructure.</p>
+    <div style="display:grid; grid-template-columns:repeat(5,1fr); gap:18px; flex:1; min-height:0;">
+      <div style="background:#fff; border:1px solid rgba(31,30,29,0.12); border-radius:12px; padding:26px 22px; display:flex; flex-direction:column;">
+        <span style="width:48px; height:48px; border-radius:10px; background:#191918; color:#fff; font-size:26px; font-weight:700; display:flex; align-items:center; justify-content:center; margin-bottom:18px;">A</span>
+        <h3 style="font-size:27px; font-weight:700; margin:0 0 10px; color:#1F1E1D;">Task record</h3>
+        <p style="font-size:23px; line-height:1.4; color:#3D3D3A; margin:0 0 auto;">The message — an 8-field issue body that any worker can pick up cold.</p>
+        <span style="font-size:20px; color:#BD5D3A; font-weight:600; margin-top:18px;">message schema</span>
+      </div>
+      <div style="background:#fff; border:1px solid rgba(31,30,29,0.12); border-radius:12px; padding:26px 22px; display:flex; flex-direction:column;">
+        <span style="width:48px; height:48px; border-radius:10px; background:#191918; color:#fff; font-size:26px; font-weight:700; display:flex; align-items:center; justify-content:center; margin-bottom:18px;">B</span>
+        <h3 style="font-size:27px; font-weight:700; margin:0 0 10px; color:#1F1E1D;">Status taxonomy</h3>
+        <p style="font-size:23px; line-height:1.4; color:#3D3D3A; margin:0 0 auto;">The state machine — six Linear statuses encode the task lifecycle.</p>
+        <span style="font-size:20px; color:#BD5D3A; font-weight:600; margin-top:18px;">lifecycle</span>
+      </div>
+      <div style="background:#fff; border:1px solid rgba(31,30,29,0.12); border-radius:12px; padding:26px 22px; display:flex; flex-direction:column;">
+        <span style="width:48px; height:48px; border-radius:10px; background:#191918; color:#fff; font-size:26px; font-weight:700; display:flex; align-items:center; justify-content:center; margin-bottom:18px;">C</span>
+        <h3 style="font-size:27px; font-weight:700; margin:0 0 10px; color:#1F1E1D;">Receipt vocabulary</h3>
+        <p style="font-size:23px; line-height:1.4; color:#3D3D3A; margin:0 0 auto;">The event log — eleven append-only tokens make the system inspectable.</p>
+        <span style="font-size:20px; color:#BD5D3A; font-weight:600; margin-top:18px;">observability</span>
+      </div>
+      <div style="background:#fff; border:1px solid rgba(31,30,29,0.12); border-radius:12px; padding:26px 22px; display:flex; flex-direction:column;">
+        <span style="width:48px; height:48px; border-radius:10px; background:#191918; color:#fff; font-size:26px; font-weight:700; display:flex; align-items:center; justify-content:center; margin-bottom:18px;">D</span>
+        <h3 style="font-size:27px; font-weight:700; margin:0 0 10px; color:#1F1E1D;">Naming contract</h3>
+        <p style="font-size:23px; line-height:1.4; color:#3D3D3A; margin:0 0 auto;">Addressing &amp; routing — a title convention two vendors agree to parse.</p>
+        <span style="font-size:20px; color:#BD5D3A; font-weight:600; margin-top:18px;">routing</span>
+      </div>
+      <div style="background:#fff; border:1px solid rgba(31,30,29,0.12); border-radius:12px; padding:26px 22px; display:flex; flex-direction:column;">
+        <span style="width:48px; height:48px; border-radius:10px; background:#191918; color:#fff; font-size:26px; font-weight:700; display:flex; align-items:center; justify-content:center; margin-bottom:18px;">E</span>
+        <h3 style="font-size:27px; font-weight:700; margin:0 0 10px; color:#1F1E1D;">Runner loop</h3>
+        <p style="font-size:23px; line-height:1.4; color:#3D3D3A; margin:0 0 auto;">The worker — one prompt repeated as a heartbeat; one task per run.</p>
+        <span style="font-size:20px; color:#BD5D3A; font-weight:600; margin-top:18px;">poller / worker</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 — TASK RECORD -->
+  <section data-label="Task record" data-speaker-notes="The atom of the system: a well-designed API request schema for a non-deterministic worker. Sources are inputs and grounding; acceptance criteria are the postcondition; boundaries are the authorization scope. The verbosity isn't bureaucracy — it's the price of decoupling: you pay upfront so any worker can pick up any task cold." style="padding:80px 104px; display:flex; flex-direction:column; background:#FAF9F5; color:#1F1E1D; overflow:hidden;">
+    <div class="eyb">Primitive A · the message</div>
+    <h2 class="ttl" style="font-size:58px; margin:16px 0 22px;">The task record</h2>
+    <div style="display:grid; grid-template-columns:1fr 1.12fr; gap:54px; flex:1; min-height:0;">
+      <div style="display:flex; flex-direction:column; gap:22px;">
+        <p class="led" style="font-size:29px; margin:0;">A well-designed <span style="font-weight:600; font-family:var(--font-sans); color:#1F1E1D;">API request schema</span> for a non-deterministic worker. The fields aren't decoration — they're an interface contract.</p>
+        <div style="display:flex; flex-direction:column; gap:14px;">
+          <div style="display:flex; gap:16px; align-items:baseline;"><span class="mono" style="font-size:22px; color:#BD5D3A; min-width:200px; font-weight:600;">sources</span><span style="font-size:24px; color:#3D3D3A;">inputs + grounding — the anti-hallucination boundary</span></div>
+          <div style="display:flex; gap:16px; align-items:baseline;"><span class="mono" style="font-size:22px; color:#BD5D3A; min-width:200px; font-weight:600;">acceptance_criteria</span><span style="font-size:24px; color:#3D3D3A;">the postcondition — the stop condition</span></div>
+          <div style="display:flex; gap:16px; align-items:baseline;"><span class="mono" style="font-size:22px; color:#BD5D3A; min-width:200px; font-weight:600;">boundaries</span><span style="font-size:24px; color:#3D3D3A;">authorization scope — the blast-radius fence</span></div>
+          <div style="display:flex; gap:16px; align-items:baseline;"><span class="mono" style="font-size:22px; color:#BD5D3A; min-width:200px; font-weight:600;">output_handoff</span><span style="font-size:24px; color:#3D3D3A;">where the next hop finds the artifact</span></div>
+        </div>
+        <p style="font-size:25px; line-height:1.45; color:#1F1E1D; margin:6px 0 0; border-left:3px solid #D97757; padding-left:20px;"><span style="font-style:italic;">"Call it bureaucracy if you want. It's respect for the task."</span> — the verbosity is the price of decoupling.</p>
+      </div>
+      <div style="background:#191918; border-radius:14px; padding:34px 38px; display:flex; flex-direction:column; justify-content:center;">
+        <div style="font-size:21px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:#D9A38C; margin-bottom:18px;">The &lt;task_issue&gt; body · 8 fields</div>
+        <pre class="mono" style="margin:0; font-size:23px; line-height:2.0; color:#E7E3DA; white-space:pre-wrap;"><span style="color:#E3A07F;">requester</span>            who owns the decision
+<span style="color:#E3A07F;">desired_outcome</span>      what should exist when done
+<span style="color:#E3A07F;">context</span>              why it matters
+<span style="color:#E3A07F;">sources</span>              what to read — invent nothing past these
+<span style="color:#E3A07F;">do</span>                   step-by-step instructions
+<span style="color:#E3A07F;">acceptance_criteria</span>  good enough to stop
+<span style="color:#E3A07F;">output_handoff</span>       where the artifact lands
+<span style="color:#E3A07F;">boundaries</span>           what to ask before doing</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6 — STATUS TAXONOMY -->
+  <section data-label="Status taxonomy" data-speaker-notes="Six Linear statuses encode a lifecycle. Moving an issue to Agent Working IS the claim — the visible lock. Standing is a parallel, never-closing lane so durable context never gets swept away. And the system distinguishes Agent Done from Agent Review: the agent is finished versus the work is finished — the honest middle most demos skip." style="padding:80px 104px; display:flex; flex-direction:column; background:#F0EEE6; color:#1F1E1D; overflow:hidden;">
+    <div class="eyb">Primitive B · the state machine</div>
+    <h2 class="ttl" style="font-size:58px; margin:16px 0 26px;">The status taxonomy</h2>
+
+    <div style="background:#EDEBE0; border:1px dashed #B4B3AC; border-radius:10px; padding:16px 26px; display:flex; align-items:center; gap:18px; margin-bottom:30px;">
+      <span style="font-size:25px; font-weight:700; color:#1F1E1D;">Standing</span>
+      <span style="font-size:24px; color:#6F6E69;">durable context · a parallel lane · never closes — config and tasks must not share a lifecycle</span>
+    </div>
+
+    <div style="display:flex; align-items:center; gap:18px; flex:1; min-height:0;">
+      <div style="background:#fff; border:1px solid rgba(31,30,29,0.18); border-radius:12px; padding:26px 28px; text-align:center; white-space:nowrap; flex-shrink:0;">
+        <div style="font-size:28px; font-weight:700;">Agent Todo</div>
+        <div style="font-size:21px; color:#6F6E69; margin-top:6px;">eligible, queued</div>
+      </div>
+      <div style="display:flex; flex-direction:column; align-items:center; color:#D97757;"><span style="font-size:21px; font-weight:600;">claim</span><span style="font-size:34px; line-height:0.8;">&rarr;</span></div>
+      <div style="background:#FBEFE9; border:2px solid #D97757; border-radius:12px; padding:26px 28px; text-align:center; white-space:nowrap; flex-shrink:0;">
+        <div style="font-size:28px; font-weight:700;">Agent Working</div>
+        <div style="font-size:21px; color:#BD5D3A; margin-top:6px; font-weight:600;">the visible lock</div>
+      </div>
+      <div style="font-size:34px; color:#B4B3AC;">&rarr;</div>
+      <div style="display:flex; flex-direction:column; gap:16px;">
+        <div style="background:#fff; border:1px solid #5A7D3E; border-radius:12px; padding:18px 22px; min-width:300px; display:flex; justify-content:space-between; align-items:center; gap:16px;">
+          <div><div style="font-size:26px; font-weight:700;">Agent Done</div><div style="font-size:20px; color:#6F6E69;">done, no review</div></div>
+          <span style="font-size:19px; font-weight:700; color:#5A7D3E; background:#EAF0E2; border-radius:999px; padding:6px 14px;">COMPLETED</span>
+        </div>
+        <div style="background:#fff; border:1px solid #D97757; border-radius:12px; padding:18px 22px; min-width:300px; display:flex; justify-content:space-between; align-items:center; gap:16px;">
+          <div><div style="font-size:26px; font-weight:700;">Agent Review</div><div style="font-size:20px; color:#6F6E69;">done, needs a human</div></div>
+          <span style="font-size:19px; font-weight:700; color:#BD5D3A; background:#F5E7DE; border-radius:999px; padding:6px 14px;">JUDGMENT</span>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex; align-items:center; gap:22px; margin-top:24px;">
+      <div style="background:#fff; border:1px solid rgba(31,30,29,0.18); border-radius:12px; padding:18px 24px; display:flex; align-items:center; gap:16px;">
+        <span style="font-size:26px; font-weight:700;">Agent Needs Input</span>
+        <span style="font-size:22px; color:#6F6E69;">blocked · human-hold</span>
+      </div>
+      <span style="font-size:24px; color:#D97757; font-weight:600;">&harr; resume before claiming new work</span>
+      <span style="font-size:24px; color:#6F6E69; margin-left:auto; max-width:560px; text-align:right;">A blocked task is a <span style="font-weight:700; color:#1F1E1D;">pause, never a terminal state.</span></span>
+    </div>
+  </section>
+
+  <!-- 7 — RECEIPT VOCABULARY -->
+  <section data-label="Receipt vocabulary" data-speaker-notes="Eleven exact tokens agents post as comments — an append-only event log that makes the system inspectable. The most underrated call: splitting AGENT BLOCKED (a missing fact, answerable by anyone reading the queue) from AGENT HUMAN HOLD (a missing authority that must escalate privately to a specific human). That separates missing data from missing permission." style="padding:78px 104px; display:flex; flex-direction:column; background:#FAF9F5; color:#1F1E1D; overflow:hidden;">
+    <div class="eyb">Primitive C · the event log</div>
+    <h2 class="ttl" style="font-size:58px; margin:16px 0 6px;">The receipt vocabulary</h2>
+    <p class="led" style="font-size:28px; margin:0 0 24px; max-width:1180px;">Eleven append-only tokens posted as comments — state is reconstructed from the log, not from your memory.</p>
+    <div style="display:grid; grid-template-columns:1.32fr 0.68fr; gap:40px; flex:1; min-height:0;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px 34px; align-content:start;">
+        <div style="display:flex; flex-direction:column; gap:2px;"><span class="mono" style="font-size:22px; color:#BD5D3A; font-weight:600;">AGENT CLAIMED</span><span style="font-size:21px; color:#6F6E69;">work started; the lock is taken</span></div>
+        <div style="display:flex; flex-direction:column; gap:2px;"><span class="mono" style="font-size:22px; color:#BD5D3A; font-weight:600;">AGENT RESUMED</span><span style="font-size:21px; color:#6F6E69;">continuing a paused issue</span></div>
+        <div style="display:flex; flex-direction:column; gap:2px;"><span class="mono" style="font-size:22px; color:#BD5D3A; font-weight:600;">AGENT DONE</span><span style="font-size:21px; color:#6F6E69;">scoped work finished</span></div>
+        <div style="display:flex; flex-direction:column; gap:2px;"><span class="mono" style="font-size:22px; color:#BD5D3A; font-weight:600;">AGENT FAILED</span><span style="font-size:21px; color:#6F6E69;">unrecoverable; last safe step + retries</span></div>
+        <div style="display:flex; flex-direction:column; gap:2px;"><span class="mono" style="font-size:22px; color:#BD5D3A; font-weight:600;">AGENT UNBLOCKED</span><span style="font-size:21px; color:#6F6E69;">the on-issue answer arrived</span></div>
+        <div style="display:flex; flex-direction:column; gap:2px;"><span class="mono" style="font-size:22px; color:#BD5D3A; font-weight:600;">AGENT APPLIED</span><span style="font-size:21px; color:#6F6E69;">installed a standing-context version</span></div>
+        <div style="display:flex; flex-direction:column; gap:2px;"><span class="mono" style="font-size:22px; color:#BD5D3A; font-weight:600;">AGENT HUMAN ANSWERED</span><span style="font-size:21px; color:#6F6E69;">the hold was answered</span></div>
+        <div style="display:flex; flex-direction:column; gap:2px;"><span class="mono" style="font-size:22px; color:#BD5D3A; font-weight:600;">AGENT FOLLOW-UP</span><span style="font-size:21px; color:#6F6E69;">a delegated issue changed state</span></div>
+        <div style="display:flex; flex-direction:column; gap:2px;"><span class="mono" style="font-size:22px; color:#BD5D3A; font-weight:600;">AGENT STATUS</span><span style="font-size:21px; color:#6F6E69;">the single in-place ledger heartbeat</span></div>
+        <div></div>
+      </div>
+      <div style="background:#191918; color:#F5F4EE; border-radius:14px; padding:30px 30px; display:flex; flex-direction:column;">
+        <div style="font-size:20px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:#D9A38C; margin-bottom:18px;">The key split</div>
+        <div style="background:rgba(217,119,87,0.16); border:1px solid #D97757; border-radius:10px; padding:18px 20px; margin-bottom:14px;">
+          <div class="mono" style="font-size:22px; color:#E3A07F; font-weight:700; margin-bottom:6px;">AGENT BLOCKED</div>
+          <div style="font-size:22px; line-height:1.35;">missing <span style="font-weight:700;">data</span> — answerable by anyone reading the queue, in the open</div>
+        </div>
+        <div style="background:rgba(217,119,87,0.16); border:1px solid #D97757; border-radius:10px; padding:18px 20px; margin-bottom:18px;">
+          <div class="mono" style="font-size:22px; color:#E3A07F; font-weight:700; margin-bottom:6px;">AGENT HUMAN HOLD</div>
+          <div style="font-size:22px; line-height:1.35;">missing <span style="font-weight:700;">authority</span> — escalates privately to a specific human</div>
+        </div>
+        <p style="font-size:22px; line-height:1.45; color:#CFC9BE; margin:auto 0 0;">Separating missing data from missing permission is what lets data-blocks resolve in public while auth-holds escalate privately.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8 — NAMING + RUNNER -->
+  <section data-label="Addressing &amp; the loop" data-speaker-notes="Addressing is content-addressable routing built from a string convention: a title with the right brackets, the agent-instructions label, the agent code, the correct assignee, and Agent Todo status. The runner is one prompt repeated as a heartbeat. Three rules carry the weight: one task per run is the transaction boundary; claim-then-re-read is optimistic locking; resume-before-claim drains the queue instead of accumulating zombies." style="padding:78px 104px; display:flex; flex-direction:column; background:#F0EEE6; color:#1F1E1D; overflow:hidden;">
+    <div class="eyb">Primitive D + the execution model</div>
+    <h2 class="ttl" style="font-size:58px; margin:16px 0 24px;">Addressing and the runner loop</h2>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:48px; flex:1; min-height:0;">
+      <div style="display:flex; flex-direction:column; gap:20px;">
+        <div style="font-size:22px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#6F6E69;">The naming contract</div>
+        <div style="background:#191918; border-radius:12px; padding:22px 24px;">
+          <div class="mono" style="font-size:23px; line-height:1.5; color:#E7E3DA;"><span style="color:#E3A07F;">[agent instructions]</span><span style="color:#9FC08A;">[sam-claude]</span><span style="color:#8FB8D6;">[task]</span> Rewrite Pro-tier copy</div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:10px;">
+          <div style="font-size:23px; color:#3D3D3A;"><span style="color:#BD5D3A; font-weight:600;">eligible only if all hold:</span> the <span class="mono" style="font-size:21px;">agent-instructions</span> label · the <span class="mono" style="font-size:21px;">[agent instructions]</span> marker · agent-code in the 2nd bracket · correct assignee · <span style="font-weight:600;">Agent Todo</span> status</div>
+        </div>
+        <p style="font-size:25px; line-height:1.45; color:#1F1E1D; margin:auto 0 0; border-left:3px solid #D97757; padding-left:20px;">Content-addressable routing out of a string convention — a Claude runtime and a Codex runtime coordinate with <span style="font-weight:700;">no API between vendors.</span></p>
+      </div>
+      <div style="display:flex; flex-direction:column;">
+        <div style="font-size:22px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#6F6E69; margin-bottom:16px;">The runner — one loop, run as a heartbeat</div>
+        <div style="display:flex; flex-direction:column; gap:9px;">
+          <div style="display:flex; gap:16px; align-items:baseline;"><span class="mono" style="color:#BD5D3A; font-size:22px;">1</span><span style="font-size:23px;">Mark ledger &rarr; "checking" <span style="color:#87867F;">(announce liveness)</span></span></div>
+          <div style="display:flex; gap:16px; align-items:baseline;"><span class="mono" style="color:#BD5D3A; font-size:22px;">2</span><span style="font-size:23px;">Standing preflight: compare context versions</span></div>
+          <div style="display:flex; gap:16px; align-items:baseline;"><span class="mono" style="color:#BD5D3A; font-size:22px;">3</span><span style="font-size:23px;">Resume <span style="font-weight:600;">human holds</span> first</span></div>
+          <div style="display:flex; gap:16px; align-items:baseline;"><span class="mono" style="color:#BD5D3A; font-size:22px;">4</span><span style="font-size:23px;">Resume <span style="font-weight:600;">blocked</span> next</span></div>
+          <div style="display:flex; gap:16px; align-items:baseline;"><span class="mono" style="color:#BD5D3A; font-size:22px;">5</span><span style="font-size:23px;">Check delegated issues you routed out</span></div>
+          <div style="display:flex; gap:16px; align-items:baseline;"><span class="mono" style="color:#BD5D3A; font-size:22px;">6</span><span style="font-size:23px;">Only then claim the oldest eligible Todo <span style="color:#87867F;">(FIFO)</span></span></div>
+          <div style="display:flex; gap:16px; align-items:baseline;"><span class="mono" style="color:#BD5D3A; font-size:22px;">7</span><span style="font-size:23px;">Claim &rarr; re-read &rarr; scoped work &rarr; receipt &rarr; ledger</span></div>
+          <div style="display:flex; gap:16px; align-items:baseline;"><span class="mono" style="color:#BD5D3A; font-size:22px;">8</span><span style="font-size:23px; font-weight:600;">STOP after exactly one task</span></div>
+        </div>
+        <div style="display:flex; gap:12px; margin-top:auto; padding-top:18px;">
+          <div style="flex:1; background:#fff; border:1px solid rgba(31,30,29,0.12); border-radius:8px; padding:12px 14px; font-size:20px; line-height:1.3;"><span style="font-weight:700;">One task / run</span><br><span style="color:#6F6E69;">the transaction boundary</span></div>
+          <div style="flex:1; background:#fff; border:1px solid rgba(31,30,29,0.12); border-radius:8px; padding:12px 14px; font-size:20px; line-height:1.3;"><span style="font-weight:700;">Claim, then re-read</span><br><span style="color:#6F6E69;">optimistic lock</span></div>
+          <div style="flex:1; background:#fff; border:1px solid rgba(31,30,29,0.12); border-radius:8px; padding:12px 14px; font-size:20px; line-height:1.3;"><span style="font-weight:700;">Resume before claim</span><br><span style="color:#6F6E69;">drain, don't accumulate</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 9 — TEAM EXAMPLE / WORKED TRACE -->
+  <section data-label="Team example" data-speaker-notes="A worked trace: change the Pro-tier price copy from $29 to $39 and ship it. It crosses two runtimes — sam-claude for copy, alex-codex for code and deploy — plus a data-block and a deploy gate. Watch the gold cards: the human is touched exactly three times — file the job, approve the copy, approve the deploy. Every one is a decision or a permission; never transport, translation, routing, memory, or recovery." style="padding:64px 90px; display:flex; flex-direction:column; background:#FAF9F5; color:#1F1E1D; overflow:hidden;">
+    <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:22px;">
+      <div>
+        <div class="eyb">Team example · a two-runtime mini-team</div>
+        <h2 class="ttl" style="font-size:52px; margin:10px 0 6px;">One job, three human touches</h2>
+        <p style="font-size:25px; color:#3D3D3A; margin:0; max-width:1180px;">Change the Pro-tier price copy from $29 to $39 and ship it — across two runtimes, a data-block, and a deploy gate.</p>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:8px; min-width:300px;">
+        <div style="display:flex; align-items:center; gap:10px;"><span style="width:20px; height:20px; border-radius:5px; background:#D97757; display:inline-block;"></span><span style="font-size:21px; color:#3D3D3A;">human required — decision or authority</span></div>
+        <div style="display:flex; align-items:center; gap:10px;"><span style="width:20px; height:20px; border-radius:5px; background:#fff; border:1px solid #B4B3AC; display:inline-block;"></span><span style="font-size:21px; color:#3D3D3A;">fully automated</span></div>
+      </div>
+    </div>
+
+    <div style="display:grid; grid-template-columns:168px repeat(6,1fr); grid-template-rows:repeat(3,1fr); gap:14px; flex:1; min-height:0;">
+      <!-- lane labels -->
+      <div style="grid-row:1; grid-column:1; display:flex; flex-direction:column; justify-content:center; border-right:2px solid rgba(31,30,29,0.12); padding-right:14px;"><span style="font-size:25px; font-weight:700;">Dana</span><span style="font-size:20px; color:#6F6E69;">requester · human</span></div>
+      <div style="grid-row:2; grid-column:1; display:flex; flex-direction:column; justify-content:center; border-right:2px solid rgba(31,30,29,0.12); padding-right:14px;"><span class="mono" style="font-size:23px; font-weight:700;">sam-claude</span><span style="font-size:20px; color:#6F6E69;">Claude runtime</span></div>
+      <div style="grid-row:3; grid-column:1; display:flex; flex-direction:column; justify-content:center; border-right:2px solid rgba(31,30,29,0.12); padding-right:14px;"><span class="mono" style="font-size:23px; font-weight:700;">alex-codex</span><span style="font-size:20px; color:#6F6E69;">Codex runtime</span></div>
+
+      <!-- Dana row -->
+      <div style="grid-row:1; grid-column:2; background:#FBEFE9; border:2px solid #D97757; border-radius:11px; padding:14px 16px; display:flex; flex-direction:column;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;"><span style="width:32px; height:32px; border-radius:50%; background:#D97757; color:#fff; font-size:20px; font-weight:700; display:flex; align-items:center; justify-content:center;">1</span><span style="font-size:18px; font-weight:700; color:#BD5D3A;">HUMAN</span></div>
+        <div style="font-size:23px; font-weight:600; line-height:1.25;">Files the task</div>
+        <div style="font-size:20px; color:#6F6E69; margin-top:auto;">Agent Todo · describe, don't run</div>
+      </div>
+      <div style="grid-row:1; grid-column:6; background:#FBEFE9; border:2px solid #D97757; border-radius:11px; padding:14px 16px; display:flex; flex-direction:column;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;"><span style="width:32px; height:32px; border-radius:50%; background:#D97757; color:#fff; font-size:20px; font-weight:700; display:flex; align-items:center; justify-content:center;">5</span><span style="font-size:18px; font-weight:700; color:#BD5D3A;">HUMAN</span></div>
+        <div style="font-size:23px; font-weight:600; line-height:1.25;">Approves the copy</div>
+        <div style="font-size:20px; color:#6F6E69; margin-top:auto;">judgment</div>
+      </div>
+
+      <!-- claude row -->
+      <div style="grid-row:2; grid-column:3; background:#fff; border:1px solid rgba(31,30,29,0.16); border-radius:11px; padding:14px 16px; display:flex; flex-direction:column;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;"><span style="width:32px; height:32px; border-radius:50%; background:#1F1E1D; color:#fff; font-size:20px; font-weight:700; display:flex; align-items:center; justify-content:center;">2</span></div>
+        <div style="font-size:23px; font-weight:600; line-height:1.25;">Claims &amp; re-reads</div>
+        <div class="mono" style="font-size:18px; color:#6F6E69; margin-top:auto;">AGENT CLAIMED</div>
+      </div>
+      <div style="grid-row:2; grid-column:4; background:#fff; border:1px solid rgba(31,30,29,0.16); border-radius:11px; padding:14px 16px; display:flex; flex-direction:column;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;"><span style="width:32px; height:32px; border-radius:50%; background:#1F1E1D; color:#fff; font-size:20px; font-weight:700; display:flex; align-items:center; justify-content:center;">3</span></div>
+        <div style="font-size:23px; font-weight:600; line-height:1.25;">Rewrites copy, opens a Codex follow-up</div>
+        <div style="font-size:18px; color:#6F6E69; margin-top:auto;">output_handoff</div>
+      </div>
+      <div style="grid-row:2; grid-column:5; background:#fff; border:1px solid rgba(31,30,29,0.16); border-radius:11px; padding:14px 16px; display:flex; flex-direction:column;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;"><span style="width:32px; height:32px; border-radius:50%; background:#1F1E1D; color:#fff; font-size:20px; font-weight:700; display:flex; align-items:center; justify-content:center;">4</span></div>
+        <div style="font-size:23px; font-weight:600; line-height:1.25;">Moves to Agent Review</div>
+        <div class="mono" style="font-size:18px; color:#6F6E69; margin-top:auto;">AGENT DONE</div>
+      </div>
+      <div style="grid-row:2; grid-column:7; background:#fff; border:1px solid rgba(31,30,29,0.16); border-radius:11px; padding:14px 16px; display:flex; flex-direction:column;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;"><span style="width:32px; height:32px; border-radius:50%; background:#1F1E1D; color:#fff; font-size:20px; font-weight:700; display:flex; align-items:center; justify-content:center;">10</span></div>
+        <div style="font-size:23px; font-weight:600; line-height:1.25;">Closes the loop</div>
+        <div class="mono" style="font-size:18px; color:#6F6E69; margin-top:auto;">AGENT FOLLOW-UP</div>
+      </div>
+
+      <!-- codex row -->
+      <div style="grid-row:3; grid-column:3; background:#fff; border:1px solid rgba(31,30,29,0.16); border-radius:11px; padding:14px 16px; display:flex; flex-direction:column;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;"><span style="width:32px; height:32px; border-radius:50%; background:#1F1E1D; color:#fff; font-size:20px; font-weight:700; display:flex; align-items:center; justify-content:center;">6</span></div>
+        <div style="font-size:23px; font-weight:600; line-height:1.25;">Edits pricing.md &rarr; $39</div>
+        <div style="font-size:18px; color:#6F6E69; margin-top:auto;">Pro tier only · boundary</div>
+      </div>
+      <div style="grid-row:3; grid-column:4; background:#fff; border:1px solid rgba(31,30,29,0.16); border-radius:11px; padding:14px 16px; display:flex; flex-direction:column;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;"><span style="width:32px; height:32px; border-radius:50%; background:#1F1E1D; color:#fff; font-size:20px; font-weight:700; display:flex; align-items:center; justify-content:center;">7</span></div>
+        <div style="font-size:22px; font-weight:600; line-height:1.2;">Broken link — answered on the issue</div>
+        <div class="mono" style="font-size:18px; color:#6F6E69; margin-top:auto;">AGENT BLOCKED</div>
+      </div>
+      <div style="grid-row:3; grid-column:5; background:#FBEFE9; border:2px solid #D97757; border-radius:11px; padding:14px 16px; display:flex; flex-direction:column;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;"><span style="width:32px; height:32px; border-radius:50%; background:#D97757; color:#fff; font-size:20px; font-weight:700; display:flex; align-items:center; justify-content:center;">8</span><span style="font-size:18px; font-weight:700; color:#BD5D3A;">HUMAN</span></div>
+        <div style="font-size:22px; font-weight:600; line-height:1.2;">Deploy needs approval</div>
+        <div class="mono" style="font-size:18px; color:#BD5D3A; margin-top:auto;">HUMAN HOLD · authority</div>
+      </div>
+      <div style="grid-row:3; grid-column:6; background:#fff; border:1px solid rgba(31,30,29,0.16); border-radius:11px; padding:14px 16px; display:flex; flex-direction:column;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;"><span style="width:32px; height:32px; border-radius:50%; background:#1F1E1D; color:#fff; font-size:20px; font-weight:700; display:flex; align-items:center; justify-content:center;">9</span></div>
+        <div style="font-size:23px; font-weight:600; line-height:1.25;">Deploy runs</div>
+        <div style="font-size:18px; color:#6F6E69; margin-top:auto;">Agent Done</div>
+      </div>
+    </div>
+
+    <p style="font-size:24px; color:#1F1E1D; margin:22px 0 0; text-align:center;">Three touches — <span style="font-weight:700; color:#BD5D3A;">file · approve copy · approve deploy.</span> Every one a decision or a permission; never transport, translation, routing, memory, or recovery.</p>
+  </section>
+
+  <!-- 10 — TAKEAWAY -->
+  <section data-label="Takeaway" data-speaker-notes="The single most portable lesson: when intelligence becomes cheap, the moat moves to the work layer — the context and handoffs that don't leave your system on their own. The model is a commodity; the coordination protocol around it is not. What's left for the human is the two irreducibly human things: judgment and authority. Build the queue before you become the bottleneck." style="padding:100px 120px; display:flex; flex-direction:column; justify-content:space-between; background:#191918; color:#F5F4EE; overflow:hidden;">
+    <div class="eyb" style="color:#D9A38C;">The takeaway</div>
+    <div style="max-width:1480px;">
+      <h2 class="ttl" style="font-size:74px; color:#F5F4EE; line-height:1.08; margin:0;">When intelligence becomes cheap, the moat moves to the <span style="color:#E3A07F;">work layer</span> — the context and handoffs that don't leave your system on their own.</h2>
+      <p class="led" style="font-size:32px; color:#CFC9BE; margin:34px 0 0;">The model is becoming a commodity; the coordination protocol around it is not. Build the queue that moves work between agents <span style="color:#F5F4EE; font-style:normal; font-weight:600; font-family:var(--font-sans);">before you become the bottleneck.</span></p>
+    </div>
+    <div style="display:flex; gap:24px; border-top:1px solid rgba(245,244,238,0.16); padding-top:30px;">
+      <div style="flex:1;"><div style="font-size:22px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#D9A38C; margin-bottom:8px;">What stays human · judgment</div><p style="font-size:25px; line-height:1.4; color:#CFC9BE; margin:0;">The Agent Review decisions you own — the work is finished, not just the agent.</p></div>
+      <div style="flex:1;"><div style="font-size:22px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#D9A38C; margin-bottom:8px;">What stays human · authority</div><p style="font-size:25px; line-height:1.4; color:#CFC9BE; margin:0;">The Human Hold permissions only you can grant — publish, deploy, spend, delete.</p></div>
+    </div>
+  </section>
+
+</div></div>
+<div class="hud"></div>
+
+<script>
+  // Replaces deck-stage.js: scale each 1920x1080 slide to fit, page one at a time.
+  const deck   = document.querySelector('.deck');
+  const slides = [...deck.children];
+  const hud    = document.querySelector('.hud');
+  const wrap   = i => (i + slides.length) % slides.length;  // index wraps both ends
+  console.assert(wrap(-1) === slides.length - 1 && wrap(slides.length) === 0, 'wrap');
+
+  let cur = 0;
+  function show(i){
+    cur = wrap(i);
+    slides.forEach((s, n) => { s.style.display = n === cur ? 'flex' : 'none'; });
+    hud.textContent = (cur + 1) + ' / ' + slides.length + '  ·  ← →';
+    location.hash = String(cur + 1);
+  }
+  function fit(){
+    deck.style.setProperty('--s', Math.min(innerWidth / 1920, innerHeight / 1080));
+  }
+
+  addEventListener('keydown', e => {
+    if (['ArrowRight', ' ', 'PageDown'].includes(e.key)) { show(cur + 1); e.preventDefault(); }
+    else if (['ArrowLeft', 'PageUp'].includes(e.key))    { show(cur - 1); e.preventDefault(); }
+    else if (e.key === 'Home') show(0);
+    else if (e.key === 'End')  show(slides.length - 1);
+  });
+  // Click left / right half to page back / forward.
+  document.querySelector('.stage').addEventListener('click', e => {
+    show(cur + (e.clientX < innerWidth / 2 ? -1 : 1));
+  });
+  addEventListener('resize', fit);
+
+  fit();
+  show((parseInt(location.hash.slice(1), 10) || 1) - 1);  // deep-link to #n
+</script>
+</body>
+</html>

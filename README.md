@@ -38,6 +38,15 @@ the copy, approve the deploy); everything else is automated.
 
 ![Open Engine worked trace: one job through every primitive, with only three human touches](open-engine-10-steps.png)
 
+## Live slide deck
+
+The whole architecture dissection is also a self-contained **10-slide deck** —
+**[open it live →](https://az9713.github.io/open-engine-adoption-assessment/open-engine-architecture.html)**
+(← → or click to page; deep-links to `#1`–`#10`). It's one HTML file with no build
+step: imported from a [Claude Design](https://claude.ai/design) project and
+re-implemented to run standalone, swapping the design-system runtime for ~45 lines that
+size each 1920×1080 slide to the viewport.
+
 ## What's here
 
 | File | What it is |
@@ -46,6 +55,7 @@ the copy, approve the deploy); everything else is automated.
 | [`work-mode-template.md`](work-mode-template.md) | The 3-habit work-mode prompt template, with worked examples and an anti-pattern |
 | [`REPORT.md`](REPORT.md) | Full architecture dissection of Open Engine + transferable design principles |
 | [`open-engine-10-steps.png`](open-engine-10-steps.png) | The worked-trace diagram above (REPORT.md §8), as a standalone image |
+| [`open-engine-architecture.html`](open-engine-architecture.html) | Self-contained 10-slide architecture deck ([view live](https://az9713.github.io/open-engine-adoption-assessment/open-engine-architecture.html)) — the dissection as slides |
 
 > Raw source material (video transcript, article text, the Open Engine guide) is **not**
 > redistributed here — see the linked originals below.
